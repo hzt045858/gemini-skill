@@ -37,11 +37,63 @@
 
 ## 4) 生图结果获取
 
-优先顺序：
-1. 图片右上角"下载原图"
-2. 右键另存为（标清）
+Gemini 一次只生成一张图片，流程上只关心**最新生成的那张**，历史图片不做处理。
 
-下载到本地后再通过渠道回传。
+调用 `GeminiOps.getLatestImage()` 获取最新一张生成图片。
+
+### DOM 结构
+
+```
+<div class="image-container ...">
+  <button class="image-button ...">
+    <img class="image loaded" src="https://lh3.googleusercontent.com/..." alt="AI 生成">
+  </button>
+  <div class="button-icon-wrapper">
+    <mat-icon fonticon="download" data-mat-icon-name="download" class="button-icon ..."></mat-icon>
+  </div>
+</div>
+```
+
+### 图片定位
+
+- 选择器：`img.image.loaded`
+- `image` class = Gemini 的图片元素
+- `loaded` class = 图片已渲染完成（未加载完的不会有此 class）
+- 两个 class 同时存在才算有效图片
+- DOM 中可能存在多张历史图片，**取最后一个**即为最新生成
+
+### 下载按钮定位
+
+- 从 `img` 向上找到最近的 `.image-container` 祖先容器
+- 在容器内查找 `mat-icon[fonticon="download"]`（即下载原图按钮）
+- `getLatestImage()` 返回 `hasDownloadBtn` 字段标识是否有下载按钮
+
+### API
+
+- `GeminiOps.getLatestImage()` → 获取最新一张图片信息
+
+```json
+{
+  "ok": true,
+  "src": "https://lh3.googleusercontent.com/...",
+  "alt": "AI 生成",
+  "width": 1024,
+  "height": 1024,
+  "hasDownloadBtn": true
+}
+```
+
+- `GeminiOps.downloadLatestImage()` → 点击最新图片的下载原图按钮
+
+```json
+{"ok": true, "src": "https://lh3.googleusercontent.com/..."}
+```
+
+### 回退
+
+- `ok === false` → 页面可能还在渲染，等几秒再调一次
+- 连续两次失败 → 做 snapshot 排查页面状态
+- `hasDownloadBtn: false` → 回退到直接用 `src` URL 下载
 
 ## 5) 用户提示文案（建议）
 

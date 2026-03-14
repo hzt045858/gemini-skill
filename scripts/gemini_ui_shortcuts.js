@@ -92,6 +92,67 @@
     return {status:s.status, label:s.label, pageVisible:!document.hidden, ts:Date.now()};
   }
 
+  /* ── 最新图片获取与下载 ──
+   * Gemini 一次只生成一张图片，流程上只关心最新生成的那张。
+   * DOM 中 img.image.loaded 按顺序排列，最后一个即为最新生成。
+   *
+   * DOM 结构：
+   *   <div class="image-container ...">
+   *     <button class="image-button ...">
+   *       <img class="image loaded" src="https://lh3.googleusercontent.com/..." alt="AI 生成">
+   *     </button>
+   *     <div class="button-icon-wrapper">
+   *       <mat-icon fonticon="download" data-mat-icon-name="download" ...></mat-icon>
+   *     </div>
+   *   </div>
+   */
+
+  function _findContainer(img){
+    var el=img;
+    while(el&&el!==document.body){
+      if(el.classList&&el.classList.contains('image-container')) return el;
+      el=el.parentElement;
+    }
+    return null;
+  }
+
+  function _findDownloadBtn(container){
+    if(!container) return null;
+    return container.querySelector('mat-icon[fonticon="download"]')
+        || container.querySelector('mat-icon[data-mat-icon-name="download"]')
+        || null;
+  }
+
+  /** 获取最新生成的一张图片信息（DOM 中最后一个 img.image.loaded） */
+  function getLatestImage(){
+    var imgs=[...document.querySelectorAll('img.image.loaded')];
+    if(!imgs.length) return {ok:false, error:'no_loaded_images'};
+    var img=imgs[imgs.length-1];
+    var container=_findContainer(img);
+    var dlBtn=_findDownloadBtn(container);
+    return {
+      ok: true,
+      src: img.src||'',
+      alt: img.alt||'',
+      width: img.naturalWidth||0,
+      height: img.naturalHeight||0,
+      hasDownloadBtn: !!dlBtn
+    };
+  }
+
+  /** 点击最新图片的"下载原图"按钮 */
+  function downloadLatestImage(){
+    var imgs=[...document.querySelectorAll('img.image.loaded')];
+    if(!imgs.length) return {ok:false, error:'no_loaded_images'};
+    var img=imgs[imgs.length-1];
+    var container=_findContainer(img);
+    var dlBtn=_findDownloadBtn(container);
+    if(!dlBtn) return {ok:false, error:'download_btn_not_found'};
+    var clickable=dlBtn.closest('button,[role="button"],.button-icon-wrapper')||dlBtn;
+    clickable.click();
+    return {ok:true, src:img.src||''};
+  }
+
   function probe(){
     var s=getStatus();
     return {
@@ -103,5 +164,5 @@
     };
   }
 
-  window.GeminiOps = {probe, click, fillPrompt, getStatus, pollStatus, selectors:S, version:'0.4.0'};
+  window.GeminiOps = {probe, click, fillPrompt, getStatus, pollStatus, getLatestImage, downloadLatestImage, selectors:S, version:'0.7.0'};
 })();

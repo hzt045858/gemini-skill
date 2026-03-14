@@ -49,10 +49,14 @@ Gemini 页面的操作按钮（`.send-button-container` 内）通过 `aria-label
 4. 将用户提示词原样输入。
 5. 发送后立即通知用户：正在绘图中。
 6. **分段轮询等待**（见下方"CDP 保活轮询策略"，生图超时上限 120s）。
-7. 结果出现后：
-   - 优先用"下载原图"按钮获取原图。
-   - 若无下载按钮或失败，可对图片右键另存（通常是标清图）。
-8. 把图片返回用户；若有多张，按顺序全部回传。
+7. 结果出现后，调用 `GeminiOps.getLatestImage()` 获取最新生成的图片（Gemini 一次只生成一张）：
+   - 返回 `{ok, src, alt, width, height, hasDownloadBtn}`。
+   - 定位依据：`<img class="image loaded">` — 只有同时具有 `image` 和 `loaded` 两个 class 的才是已渲染完成的生成图片；DOM 中取最后一个即为最新。
+   - `src` 为 `https://lh3.googleusercontent.com/...` 格式的原图 URL。
+   - 若 `ok === false`，等几秒再调一次；连续两次失败则做 snapshot 排查页面状态。
+   - 若 `hasDownloadBtn: true`，可调用 `GeminiOps.downloadLatestImage()` 点击原图下载按钮。
+   - 下载按钮定位：从 `img` 向上找到 `.image-container` 容器，容器内的 `mat-icon[fonticon="download"]` 即为下载原图按钮。
+8. 把图片返回用户。
 
 ## CDP 保活轮询策略
 
