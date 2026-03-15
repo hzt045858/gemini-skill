@@ -255,7 +255,7 @@ const BROWSER_ARGS = [
     : []),
 
   // ── 反检测（配合 stealth 插件 + ignoreDefaultArgs） ──
-  '--disable-blink-features=AutomationControlled', // 移除 navigator.webdriver 标记，降低被检测为自动化的风险
+  //'--disable-blink-features=AutomationControlled', // 移除 navigator.webdriver 标记，降低被检测为自动化的风险。stealth已经带上了，这里额外写会造成参数错误。
 
   // ── 网络 / 性能 ──
   '--disable-background-networking',         // 禁止后台网络请求（更新检查、遥测等）
@@ -439,12 +439,26 @@ export async function ensureBrowser(opts = {}) {
 
 /**
  * 断开浏览器连接（不杀进程，方便下次复用）
+ *
+ * 在 Windows 上，Node 退出时默认会终止所有子进程。
+ * 因此 disconnect 前先对浏览器子进程做 unref + stdio detach，
+ * 使浏览器进程脱离 Node 进程树，独立存活。
  */
 export function disconnect() {
   if (_browser) {
+    // 解除 Node 对浏览器子进程的引用，防止 Node 退出时杀掉它
+    const proc = _browser.process();
+    if (proc) {
+      proc.unref();
+      // 同时 unref 所有 stdio 流，避免 Node 因为管道未关闭而挂住
+      if (proc.stdin)  proc.stdin.unref();
+      if (proc.stdout) proc.stdout.unref();
+      if (proc.stderr) proc.stderr.unref();
+    }
+
     _browser.disconnect();
     _browser = null;
-    console.log('[browser] disconnected');
+    console.log('[browser] disconnected (browser process kept alive)');
   }
 }
 
