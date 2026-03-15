@@ -14,13 +14,68 @@
  *
  * 所有配置项见 .env，可直接编辑或通过命令行设环境变量。
  */
+import { execSync } from 'node:child_process';
+import { platform } from 'node:os';
 import { createGeminiSession, disconnect } from './index.js';
+
+// ── Demo 专用：杀掉所有 Chromium 系浏览器进程 ──
+function killAllBrowserProcesses() {
+  const os = platform();
+  const commands = os === 'win32'
+    ? [
+        'taskkill /F /IM msedge.exe /T',
+        'taskkill /F /IM chrome.exe /T',
+        'taskkill /F /IM chromium.exe /T',
+      ]
+    : [
+        'pkill -f msedge || true',
+        'pkill -f chrome || true',
+        'pkill -f chromium || true',
+      ];
+
+  for (const cmd of commands) {
+    try {
+      execSync(cmd, { stdio: 'ignore', timeout: 5000 });
+    } catch {
+      // 进程不存在时会报错，忽略
+    }
+  }
+  console.log('[demo] 已清理所有浏览器进程');
+}
+
+/** 异步等待 */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 创建会话，如果因浏览器目录被锁而失败，自动杀掉全部浏览器进程后重试一次
+ */
+async function createSessionWithRetry() {
+  try {
+    return await createGeminiSession();
+  } catch (err) {
+    const msg = err.message || '';
+    const isLocked = msg.includes('EPERM') || msg.includes('lock') || msg.includes('already');
+
+    if (!isLocked) throw err;
+
+    console.warn(
+      `[demo] 浏览器数据目录被占用，正在清理所有浏览器进程后重试...\n` +
+      `  原始错误：${msg}`
+    );
+
+    killAllBrowserProcesses();
+    await sleep(2000);
+
+    // 重试一次，还失败就直接抛出
+    return await createGeminiSession();
+  }
+}
 
 async function main() {
   console.log('=== Gemini Skill Demo ===\n');
 
-  // 创建会话（配置自动从环境变量读取，也可以传 opts 覆盖）
-  const { ops } = await createGeminiSession();
+  // 创建会话：自带杀进程重试逻辑
+  const { ops } = await createSessionWithRetry();
 
   try {
     // 1. 探测页面状态

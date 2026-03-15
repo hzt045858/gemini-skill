@@ -398,6 +398,7 @@ export async function ensureBrowser(opts = {}) {
     // 大概率是用户数据目录被正在运行的浏览器锁住了
     if (err.message?.includes('EPERM') || err.message?.includes('lock') || err.message?.includes('already')) {
       throw new Error(
+        `报错信息：${err.message}\n`+
         `[browser] 无法启动浏览器，用户数据目录可能被占用：${userDataDir}\n` +
         `这通常是因为该浏览器正在运行且锁定了数据目录。\n\n` +
         `请选择以下任一方式解决：\n` +
