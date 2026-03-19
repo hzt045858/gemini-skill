@@ -10,6 +10,7 @@
  *   - 鼠标 / 键盘事件通过 CDP Input 域发送，生成 isTrusted=true 的原生事件
  *   - 每个方法都是独立的原子操作，上层 gemini-ops.js 负责编排组合
  */
+import { sleep } from './util.js';
 
 /**
  * 创建 operator 实例
@@ -92,7 +93,7 @@ export function createOperator(page) {
    */
   function randomDelay(min, max) {
     const ms = min + Math.random() * (max - min);
-    return new Promise(r => setTimeout(r, ms));
+    return sleep(ms);
   }
 
   // ─── 公开 API ───
@@ -264,7 +265,7 @@ export function createOperator(page) {
             return { ok: true, result, elapsed: Date.now() - start };
           }
         } catch { /* 页面可能还在加载 */ }
-        await new Promise(r => setTimeout(r, interval));
+        await sleep(interval);
       }
 
       return { ok: false, error: 'timeout', elapsed: Date.now() - start };

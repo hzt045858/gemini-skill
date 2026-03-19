@@ -410,6 +410,49 @@ export function createOps(page) {
     },
 
     /**
+     * 获取当前会话中所有 Gemini 的文字回复
+     *
+     * 选择器：div.response-content
+     * 直接使用 innerText 提取渲染后的文本，浏览器排版引擎会自动处理换行和格式
+     *
+     * @returns {Promise<{ok: boolean, responses: Array<{index: number, text: string}>, total: number, error?: string}>}
+     */
+    async getAllTextResponses() {
+      return op.query(() => {
+        const divs = [...document.querySelectorAll('div.response-content')];
+        if (!divs.length) {
+          return { ok: false, responses: [], total: 0, error: 'no_responses' };
+        }
+
+        const responses = divs.map((div, i) => ({
+          index: i,
+          text: (div.innerText || '').trim(),
+        }));
+
+        return { ok: true, responses, total: responses.length };
+      });
+    },
+
+    /**
+     * 获取最新一条 Gemini 文字回复
+     *
+     * 取最后一个 div.response-content，使用 innerText 提取渲染后的文本
+     *
+     * @returns {Promise<{ok: boolean, text?: string, index?: number, error?: string}>}
+     */
+    async getLatestTextResponse() {
+      return op.query(() => {
+        const divs = [...document.querySelectorAll('div.response-content')];
+        if (!divs.length) {
+          return { ok: false, error: 'no_responses' };
+        }
+
+        const last = divs[divs.length - 1];
+        return { ok: true, text: (last.innerText || '').trim(), index: divs.length - 1 };
+      });
+    },
+
+    /**
      * 获取本次会话中所有已加载的图片
      *
      * 选择器逻辑：
@@ -877,6 +920,4 @@ function isImageLoaded(op) {
   });
 }
 
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
+

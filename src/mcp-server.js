@@ -23,12 +23,39 @@ server.registerTool(
       newSession: z.boolean().default(false).describe(
         "是否新建会话。true= 开启全新对话; false = 复用当前已有的 Gemini 会话页"
       ),
+      referenceImages: z.array(z.string()).default([]).describe(
+        "参考图片的本地文件路径数组，例如 [\"/path/to/ref1.png\", \"/path/to/ref2.jpg\"]。图片会在发送 prompt 前上传到 Gemini 输入框"
+      ),
     },
   },
-  async ({ prompt, newSession }) => {
+  async ({ prompt, newSession, referenceImages }) => {
     try {
       const { ops } = await createGeminiSession();
-      const result = await ops.generateImage(prompt, { newChat: newSession });
+
+      // 如果有参考图，先上传
+      if (referenceImages.length > 0) {
+        // 需要先处理新建会话（如果需要），因为 generateImage 内部的 newChat 会在上传之后才执行
+        if (newSession) {
+          await ops.click('newChatBtn');
+          await sleep(500);
+        }
+
+        for (const imgPath of referenceImages) {
+          console.error(`[mcp] 正在上传参考图: ${imgPath}`);
+          const uploadResult = await ops.uploadImage(imgPath);
+          if (!uploadResult.ok) {
+            return {
+              content: [{ type: "text", text: `参考图上传失败: ${imgPath}\n错误: ${uploadResult.error}` }],
+              isError: true,
+            };
+          }
+        }
+        console.error(`[mcp] ${referenceImages.length} 张参考图上传完成`);
+      }
+
+      // 如果上传了参考图且已手动新建会话，则 generateImage 内部不再新建
+      const needNewChat = referenceImages.length > 0 ? false : newSession;
+      const result = await ops.generateImage(prompt, { newChat: needNewChat });
 
       // 执行完毕立刻断开，交还给 Daemon 倒计时
       disconnect();
@@ -70,6 +97,330 @@ server.registerTool(
     }
   }
 );
+
+// ─── 会话管理 ───
+
+// 新建会话
+server.registerTool(
+  "gemini_new_chat",
+  {
+    description: "在 Gemini 中新建一个空白对话",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const { ops } = await createGeminiSession();
+      const result = await ops.click('newChatBtn');
+      disconnect();
+
+      if (!result.ok) {
+        return { content: [{ type: "text", text: `新建会话失败: ${result.error}` }], isError: true };
+      }
+      return { content: [{ type: "text", text: "已新建 Gemini 会话" }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// 临时会话
+server.registerTool(
+  "gemini_temp_chat",
+  {
+    description: "进入 Gemini 临时对话模式（不保留历史记录，适合隐私场景）。注意：临时会话按钮仅在空白新会话页面可见，本工具会自动先新建会话再进入临时模式",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const { ops } = await createGeminiSession();
+
+      // 临时会话按钮仅在空白新会话页可见，当前会话有内容时会被隐藏
+      // 因此必须先新建会话，确保页面回到空白状态
+      const newChatResult = await ops.click('newChatBtn');
+      if (!newChatResult.ok) {
+        disconnect();
+        return { content: [{ type: "text", text: `前置步骤失败：无法新建会话（临时会话按钮仅在空白页可见）: ${newChatResult.error}` }], isError: true };
+      }
+      // 等待新会话页面稳定
+      await sleep(250);
+
+      const result = await ops.clickTempChat();
+      disconnect();
+
+      if (!result.ok) {
+        return { content: [{ type: "text", text: `进入临时会话失败: ${result.error}` }], isError: true };
+      }
+      return { content: [{ type: "text", text: "已进入临时对话模式（自动先新建了空白会话）" }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ─── 模型切换 ───
+
+server.registerTool(
+  "gemini_switch_model",
+  {
+    description: "切换 Gemini 模型（pro / quick / think）",
+    inputSchema: {
+      model: z.enum(["pro", "quick", "think"]).describe("目标模型：pro=高质量, quick=快速, think=深度思考"),
+    },
+  },
+  async ({ model }) => {
+    try {
+      const { ops } = await createGeminiSession();
+      const result = await ops.switchToModel(model);
+      disconnect();
+
+      if (!result.ok) {
+        return { content: [{ type: "text", text: `切换模型失败: ${result.error}` }], isError: true };
+      }
+      return {
+        content: [{ type: "text", text: `模型已切换到 ${model}${result.previousModel ? `（之前是 ${result.previousModel}）` : ''}` }],
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ─── 文本对话 ───
+
+server.registerTool(
+  "gemini_send_message",
+  {
+    description: "向 Gemini 发送文本消息并等待回答完成（不提取图片，纯文本交互）",
+    inputSchema: {
+      message: z.string().describe("要发送给 Gemini 的文本内容"),
+      timeout: z.number().default(120000).describe("等待回答完成的超时时间（毫秒），默认 120000"),
+    },
+  },
+  async ({ message, timeout }) => {
+    try {
+      const { ops } = await createGeminiSession();
+      const result = await ops.sendAndWait(message, { timeout });
+      disconnect();
+
+      if (!result.ok) {
+        return { content: [{ type: "text", text: `发送失败: ${result.error}，耗时 ${result.elapsed}ms` }], isError: true };
+      }
+      return {
+        content: [{ type: "text", text: `消息已发送并等待完成，耗时 ${result.elapsed}ms` }],
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ─── 图片上传 ───
+
+server.registerTool(
+  "gemini_upload_images",
+  {
+    description: "向 Gemini 当前输入框上传图片（仅上传，不发送消息），可配合 gemini_send_message 组合使用",
+    inputSchema: {
+      images: z.array(z.string()).min(1).describe("本地图片文件路径数组"),
+    },
+  },
+  async ({ images }) => {
+    try {
+      const { ops } = await createGeminiSession();
+
+      const results = [];
+      for (const imgPath of images) {
+        console.error(`[mcp] 正在上传: ${imgPath}`);
+        const r = await ops.uploadImage(imgPath);
+        results.push({ path: imgPath, ...r });
+        if (!r.ok) {
+          disconnect();
+          return {
+            content: [{ type: "text", text: `上传失败: ${imgPath}\n错误: ${r.error}\n\n已成功上传 ${results.filter(x => x.ok).length}/${images.length} 张` }],
+            isError: true,
+          };
+        }
+      }
+
+      disconnect();
+      return {
+        content: [{ type: "text", text: `全部 ${images.length} 张图片上传成功` }],
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ─── 图片获取 ───
+
+server.registerTool(
+  "gemini_get_images",
+  {
+    description: "获取当前 Gemini 会话中所有已加载的图片列表（不下载，仅返回元信息）",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const { ops } = await createGeminiSession();
+      const result = await ops.getAllImages();
+      disconnect();
+
+      if (!result.ok) {
+        return { content: [{ type: "text", text: `未找到图片: ${result.error}` }], isError: true };
+      }
+
+      return {
+        content: [{ type: "text", text: JSON.stringify({ total: result.total, newCount: result.newCount, images: result.images }, null, 2) }],
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+server.registerTool(
+  "gemini_extract_image",
+  {
+    description: "提取指定图片的 base64 数据并保存到本地文件。可从 gemini_get_images 获取图片 src URL",
+    inputSchema: {
+      imageUrl: z.string().describe("图片的 src URL（从 gemini_get_images 结果中获取）"),
+    },
+  },
+  async ({ imageUrl }) => {
+    try {
+      const { ops } = await createGeminiSession();
+      const result = await ops.extractImageBase64(imageUrl);
+      disconnect();
+
+      if (!result.ok) {
+        return { content: [{ type: "text", text: `图片提取失败: ${result.error}${result.detail ? ' — ' + result.detail : ''}` }], isError: true };
+      }
+
+      // 保存到本地
+      const base64Data = result.dataUrl.split(',')[1];
+      const mimeMatch = result.dataUrl.match(/^data:(image\/\w+);/);
+      const ext = mimeMatch ? mimeMatch[1].split('/')[1] : 'png';
+
+      mkdirSync(config.outputDir, { recursive: true });
+      const filename = `gemini_${Date.now()}.${ext}`;
+      const filePath = join(config.outputDir, filename);
+      writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+
+      console.error(`[mcp] 图片已保存至 ${filePath}`);
+
+      return {
+        content: [
+          { type: "text", text: `图片提取成功，已保存至: ${filePath}` },
+          { type: "image", data: base64Data, mimeType: mimeMatch ? mimeMatch[1] : "image/png" },
+        ],
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ─── 文字回复获取 ───
+
+server.registerTool(
+  "gemini_get_all_text_responses",
+  {
+    description: "获取当前 Gemini 会话中所有文字回复内容（仅文字，不含图片等其他类型回复）",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const { ops } = await createGeminiSession();
+      const result = await ops.getAllTextResponses();
+      disconnect();
+
+      if (!result.ok) {
+        return { content: [{ type: "text", text: `未找到回复: ${result.error}` }], isError: true };
+      }
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+server.registerTool(
+  "gemini_get_latest_text_response",
+  {
+    description: "获取当前 Gemini 会话中最新一条文字回复（仅文字，不含图片等其他类型回复）",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const { ops } = await createGeminiSession();
+      const result = await ops.getLatestTextResponse();
+      disconnect();
+
+      if (!result.ok) {
+        return { content: [{ type: "text", text: `未找到回复: ${result.error}` }], isError: true };
+      }
+
+      return {
+        content: [{ type: "text", text: result.text }],
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ─── 页面状态 & 恢复 ───
+
+server.registerTool(
+  "gemini_probe",
+  {
+    description: "探测 Gemini 页面各元素状态（输入框、按钮、当前模型等），用于调试和排查问题",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const { ops } = await createGeminiSession();
+      const result = await ops.probe();
+      disconnect();
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+server.registerTool(
+  "gemini_reload_page",
+  {
+    description: "刷新 Gemini 页面（页面卡住或状态异常时使用）",
+    inputSchema: {
+      timeout: z.number().default(30000).describe("等待页面重新加载完成的超时（毫秒），默认 30000"),
+    },
+  },
+  async ({ timeout }) => {
+    try {
+      const { ops } = await createGeminiSession();
+      const result = await ops.reloadPage({ timeout });
+      disconnect();
+
+      if (!result.ok) {
+        return { content: [{ type: "text", text: `页面刷新失败: ${result.error}` }], isError: true };
+      }
+      return { content: [{ type: "text", text: `页面刷新完成，耗时 ${result.elapsed}ms` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ─── 浏览器信息 ───
 
 // 查询浏览器信息
 server.registerTool(

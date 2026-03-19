@@ -1,6 +1,6 @@
 ---
 name: gemini-skill
-description: 通过 Gemini 官网（gemini.google.com）执行生图操作。用户提到"生图/画图/绘图/nano banana/nanobanana/生成图片"等关键词时触发。所有浏览器操作已封装为 MCP 工具，AI 无需手动操控浏览器，但必要时可以通过gemini_browser_info获取浏览器连接信息，如CDP连接端口，方便AI自行连接调试。
+description: 通过 Gemini 官网（gemini.google.com）执行生图操作。用户提到"生图/画图/绘图/nano banana/nanobanana/生成图片"等关键词时触发。所有浏览器操作已封装为 MCP 工具，AI 无需手动操控浏览器，但必要时可以通过gemini_browser_info获取浏览器连接信息，方便AI自行连接调试。
 ---
 
 # Gemini Skill
@@ -18,22 +18,63 @@ description: 通过 Gemini 官网（gemini.google.com）执行生图操作。用
 
 ### 可用工具
 
+**核心生图（封装完整流程）：**
+
 | 工具名 | 说明 | 入参 |
 |--------|------|------|
-| `gemini_generate_image` | 生成图片，返回本地文件路径 + base64 图片 | `prompt`（描述词），`newSession`（是否新建会话，默认 false） |
-| `gemini_browser_info` | 获取浏览器连接信息（CDP 端口、wsEndpoint、Daemon 状态等） | 无 |
+| `gemini_generate_image` | 完整生图流程：新建会话→发prompt→等待→提取图片→保存本地 | `prompt`，`newSession`（默认false），`referenceImages`（参考图路径数组，默认空） |
 
-### 典型调用流程
+**会话管理：**
 
-1. 用户说"帮我画一张猫咪的图"
-2. 调用 `gemini_generate_image`，传入 prompt
-3. 工具返回本地图片路径和 base64 数据
-4. 将图片展示给用户
+| 工具名 | 说明 | 入参 |
+|--------|------|------|
+| `gemini_new_chat` | 新建一个空白对话 | 无 |
+| `gemini_temp_chat` | 进入临时对话模式（不保留历史记录） | 无 |
 
-### 参数说明
+**模型切换：**
 
-- `newSession: false`（默认）— 复用当前 Gemini 会话页，适合连续生图
-- `newSession: true` — 新建干净会话，适合全新主题
+| 工具名 | 说明 | 入参 |
+|--------|------|------|
+| `gemini_switch_model` | 切换 Gemini 模型 | `model`（`pro` / `quick` / `think`） |
+
+**文本对话：**
+
+| 工具名 | 说明 | 入参 |
+|--------|------|------|
+| `gemini_send_message` | 发送文本消息并等待回答完成 | `message`，`timeout`（默认120000ms） |
+
+**图片操作：**
+
+| 工具名 | 说明 | 入参 |
+|--------|------|------|
+| `gemini_upload_images` | 上传图片到输入框（仅上传不发送，可配合 send_message） | `images`（路径数组） |
+| `gemini_get_images` | 获取会话中所有已加载图片的元信息 | 无 |
+| `gemini_extract_image` | 提取指定图片的 base64 并保存到本地 | `imageUrl`（从 get_images 获取） |
+
+**诊断 & 恢复：**
+
+| 工具名 | 说明 | 入参 |
+|--------|------|------|
+| `gemini_probe` | 探测页面各元素状态（输入框、按钮、模型等） | 无 |
+| `gemini_reload_page` | 刷新页面（卡住或异常时使用） | `timeout`（默认30000ms） |
+| `gemini_browser_info` | 获取浏览器连接信息（CDP 端口、wsEndpoint 等） | 无 |
+
+### 典型用法
+
+**快速生图（一步到位）：**
+1. 调用 `gemini_generate_image`，传入 prompt → 返回本地图片路径
+
+**灵活组合（细粒度控制）：**
+1. `gemini_new_chat` — 新建会话
+2. `gemini_switch_model` → `pro` — 切换到高质量模型
+3. `gemini_upload_images` — 上传参考图
+4. `gemini_send_message` — 发送描述词
+5. `gemini_get_images` → `gemini_extract_image` — 获取并保存图片
+
+**排障：**
+1. `gemini_probe` — 看看页面元素有没有就位
+2. `gemini_reload_page` — 页面卡了就刷新
+3. `gemini_browser_info` — 获取 CDP 信息自行连接调试
 
 ## MCP 客户端配置
 

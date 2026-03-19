@@ -21,6 +21,7 @@ import puppeteerCore from 'puppeteer-core';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import config from './config.js';
+import { sleep } from './util.js';
 
 // connect 也套上 Stealth，双保险
 const puppeteer = addExtra(puppeteerCore);
@@ -93,7 +94,7 @@ async function ensureDaemon() {
   // 轮询等待就绪
   const deadline = Date.now() + DAEMON_READY_TIMEOUT;
   while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, DAEMON_POLL_INTERVAL));
+    await sleep(DAEMON_POLL_INTERVAL);
     if (await isDaemonAlive()) {
       console.log('[browser] ✅ Daemon 就绪');
       return;
