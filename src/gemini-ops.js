@@ -906,6 +906,40 @@ export function createOps(page) {
     },
 
     /**
+     * 导航到指定的 Gemini 页面 URL
+     *
+     * 仅允许 gemini.google.com 域名下的地址（如指定会话 URL），
+     * 其他域名会直接拒绝，防止浏览器被劫持到不安全页面。
+     *
+     * @param {string} url - 目标 URL，必须是 gemini.google.com 域名
+     * @param {object} [options]
+     * @param {number} [options.timeout=30000] - 等待页面加载的超时时间（ms）
+     * @returns {Promise<{ok: boolean, url?: string, elapsed?: number, error?: string, detail?: string}>}
+     */
+    async navigateTo(url, { timeout = 30_000 } = {}) {
+      try {
+        // 域名白名单校验
+        const parsed = new URL(url);
+        if (parsed.hostname !== 'gemini.google.com') {
+          return {
+            ok: false,
+            error: 'invalid_domain',
+            detail: `仅允许 gemini.google.com 域名，收到: ${parsed.hostname}`,
+          };
+        }
+
+        const start = Date.now();
+        await page.goto(url, { waitUntil: 'networkidle2', timeout });
+        const elapsed = Date.now() - start;
+        const finalUrl = page.url();
+        console.log(`[ops] 页面导航完成 → ${finalUrl} (${elapsed}ms)`);
+        return { ok: true, url: finalUrl, elapsed };
+      } catch (e) {
+        return { ok: false, error: 'navigate_failed', detail: e.message };
+      }
+    },
+
+    /**
      * 上传图片到 Gemini 输入框
      *
      * 流程：

@@ -45,7 +45,7 @@ server.registerTool(
     inputSchema: {
       prompt: z.string().describe("图片的详细描述词。提示：描述越详细越好，包含风格、构图、色调等关键词能显著提升生成质量"),
       newSession: z.boolean().default(false).describe(
-        "是否新建会话。true= 开启全新对话（推荐生成全新图片时使用）; false= 复用当前会话（适合基于上下文迭代修改）"
+        "是否新建会话。true= 开启全新对话（推荐生成全新图片时使用）; false= 复用当前会话（适合基于上下文迭代修改，默认应该为）"
       ),
       referenceImages: z.array(z.string()).default([]).describe(
         "参考图片的本地文件路径数组，例如 [\"/path/to/ref1.png\", \"/path/to/ref2.jpg\"]。图片会在发送 prompt 前上传到 Gemini 输入框"
@@ -534,6 +534,39 @@ server.registerTool(
         return { content: [{ type: "text", text: `页面刷新失败: ${result.error}` }], isError: true };
       }
       return { content: [{ type: "text", text: `页面刷新完成，耗时 ${result.elapsed}ms` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ─── 页面导航 ───
+
+server.registerTool(
+  "gemini_navigate_to",
+  {
+    description: "打开指定的 Gemini 页面 URL（如特定会话链接）。仅允许 gemini.google.com 域名，其他域名会被拒绝。适用于需要恢复到某个历史会话继续对话的场景",
+    inputSchema: {
+      url: z.string().url().describe(
+        "目标 Gemini URL，例如 https://gemini.google.com/app/57ace74d20f70d13 。必须是 gemini.google.com 域名"
+      ),
+      timeout: z.number().default(30000).describe("等待页面加载完成的超时（毫秒），默认 30000"),
+    },
+  },
+  async ({ url, timeout }) => {
+    try {
+      const { ops } = await createGeminiSession();
+      const result = await ops.navigateTo(url, { timeout });
+      disconnect();
+
+      if (!result.ok) {
+        let msg = `页面导航失败: ${result.error}`;
+        if (result.detail) msg += `\n${result.detail}`;
+        return { content: [{ type: "text", text: msg }], isError: true };
+      }
+      return {
+        content: [{ type: "text", text: `已导航至: ${result.url}（耗时 ${result.elapsed}ms）` }],
+      };
     } catch (err) {
       return { content: [{ type: "text", text: `执行崩溃: ${err.message}` }], isError: true };
     }
