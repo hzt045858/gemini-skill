@@ -267,3 +267,6 @@ gemini-skill/
 ## 📄 License
 
 ISC
+
+## LINUX DO 
+本项目支持[LINUX DO](https://linux.do) 社区
